@@ -1,0 +1,67 @@
+pip install langchain-groq
+!pip install langchain-classic langchain langchain-community langchain-core langchain-text-splitters langchain-groq langchain-chroma langchain-huggingface sentence-transformers
+!pip install langchain-chroma
+
+
+import os
+from langchain_chroma import Chroma
+from langchain_community.document_loaders import TextLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_huggingface import HuggingFaceEmbeddings
+
+# Core legacy LangChain structures (Supported by langchain-classic)
+from langchain_classic.chains import create_retrieval_chain
+from langchain_classic.chains.combine_documents import create_stuff_documents_chain
+
+# Use Groq integration
+from langchain_groq import ChatGroq
+
+# 1. Set your Groq key
+os.environ["GROQ_API_KEY"] = ""
+
+# 2. Automatically create the sample text file
+with open("sample.txt", "w", encoding="utf-8") as f:
+    f.write("""
+    Project Apollo was the third United States human spaceflight program carried out by NASA.
+    It succeeded in landing the first humans on the Moon in 1969.
+    The mission that accomplished this was Apollo 11, crewed by Neil Armstrong, Buzz Aldrin, and Michael Collins.
+    Neil Armstrong was the first person to walk on the moon, famously stating: 'That's one small step for man, one giant leap for mankind.'
+    """)
+
+# 3. Load and split the document
+loader = TextLoader("sample.txt")
+docs = loader.load()
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+chunks = text_splitter.split_documents(docs)
+
+print("Loading local embedding model...")
+embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+vector_store = Chroma.from_documents(chunks, embeddings)
+print("Vector store created successfully!")
+
+# 4. Build retriever
+retriever = vector_store.as_retriever(search_kwargs={"k": 2})
+
+# 5. Define prompt behavior
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a helpful assistant. Answer the user's question using only the provided context.\n\nContext:\n{context}"),
+    ("human", "{input}"),
+])
+
+print("Initializing Groq LLM (Llama-3.1)...")
+# 6. Initialize the requested Llama 3.1 model
+llm = ChatGroq(
+    model="llama-3.1-8b-instant",
+    temperature=0
+)
+
+# 7. Assemble and run the chain
+question_answer_chain = create_stuff_documents_chain(llm, prompt)
+rag_chain = create_retrieval_chain(retriever, question_answer_chain)
+
+print("Sending question to Groq...")
+response = rag_chain.invoke({"input": "mission"})
+
+print("\n--- Success! ---")
+print("Answer:", response["answer"])
